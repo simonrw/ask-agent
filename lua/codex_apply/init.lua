@@ -8,6 +8,10 @@ local defaults = {
   notify = vim.notify,
   prompt_width = 72,
   prompt_height = 10,
+  progress_height_ratio = 0.33,
+  close_progress_on_success = false,
+  live_reload = true,
+  live_reload_interval_ms = 1000,
 }
 
 M.config = vim.deepcopy(defaults)
@@ -146,6 +150,90 @@ local function close_prompt(win, buf)
   end
 end
 
+local function append_lines(buf, lines)
+  if not vim.api.nvim_buf_is_valid(buf) or not lines or #lines == 0 then
+    return
+  end
+
+  vim.api.nvim_set_option_value("modifiable", true, { buf = buf })
+  vim.api.nvim_buf_set_lines(buf, -1, -1, false, lines)
+  vim.api.nvim_set_option_value("modifiable", false, { buf = buf })
+
+  for _, win in ipairs(vim.fn.win_findbuf(buf)) do
+    if vim.api.nvim_win_is_valid(win) then
+      vim.api.nvim_win_set_cursor(win, { vim.api.nvim_buf_line_count(buf), 0 })
+    end
+  end
+end
+
+local function normalize_job_lines(data)
+  local lines = {}
+  for _, line in ipairs(data or {}) do
+    if line ~= "" then
+      table.insert(lines, line)
+    end
+  end
+  return lines
+end
+
+local function checktime()
+  if M.config.live_reload then
+    vim.cmd.checktime()
+  end
+end
+
+local function open_progress()
+  local previous_win = vim.api.nvim_get_current_win()
+  local height = math.max(3, math.floor(vim.o.lines * M.config.progress_height_ratio))
+
+  vim.cmd("botright " .. height .. "split")
+  local win = vim.api.nvim_get_current_win()
+  local buf = vim.api.nvim_create_buf(false, true)
+
+  vim.api.nvim_win_set_buf(win, buf)
+  vim.api.nvim_set_option_value("buftype", "nofile", { buf = buf })
+  vim.api.nvim_set_option_value("bufhidden", "wipe", { buf = buf })
+  vim.api.nvim_set_option_value("swapfile", false, { buf = buf })
+  vim.api.nvim_set_option_value("filetype", "codex-progress", { buf = buf })
+  vim.api.nvim_set_option_value("modifiable", false, { buf = buf })
+  vim.api.nvim_set_option_value("wrap", true, { win = win })
+
+  vim.keymap.set("n", "q", function()
+    if vim.api.nvim_win_is_valid(win) then
+      vim.api.nvim_win_close(win, true)
+    end
+  end, { buffer = buf, silent = true, desc = "Close Codex progress" })
+
+  append_lines(buf, { "Codex started..." })
+
+  if vim.api.nvim_win_is_valid(previous_win) then
+    vim.api.nvim_set_current_win(previous_win)
+  end
+
+  return { buf = buf, win = win }
+end
+
+local function start_reload_timer()
+  if not M.config.live_reload then
+    return nil
+  end
+
+  local timer = vim.loop.new_timer()
+  timer:start(M.config.live_reload_interval_ms, M.config.live_reload_interval_ms, function()
+    vim.schedule(checktime)
+  end)
+  return timer
+end
+
+local function stop_reload_timer(timer)
+  if not timer then
+    return
+  end
+
+  timer:stop()
+  timer:close()
+end
+
 local function run_codex(prompt, repo_root)
   if vim.bo.modified then
     vim.cmd.write()
@@ -153,33 +241,85 @@ local function run_codex(prompt, repo_root)
 
   local args = M.build_args(repo_root)
   local stderr = {}
+  local progress = open_progress()
+  local reload_timer = start_reload_timer()
 
   notify("Codex started", vim.log.levels.INFO)
 
-  vim.system({ M.config.codex_cmd, unpack(args) }, {
+  local job_id = vim.fn.jobstart(vim.list_extend({ M.config.codex_cmd }, args), {
     cwd = repo_root,
-    stdin = prompt,
-    text = true,
-  }, function(result)
-    vim.schedule(function()
-      if result.stderr and result.stderr ~= "" then
-        stderr = vim.split(result.stderr, "\n", { trimempty = true })
-      end
-
-      if result.code == 0 then
-        vim.cmd.checktime()
-        notify("Codex finished and files were checked for reload", vim.log.levels.INFO)
+    stdout_buffered = true,
+    stderr_buffered = false,
+    on_stdout = function(_, data)
+      local lines = normalize_job_lines(data)
+      if #lines == 0 then
         return
       end
 
-      local detail = table.concat(vim.list_slice(stderr, 1, 3), "\n")
-      local message = "Codex failed with exit code " .. result.code
-      if detail ~= "" then
-        message = message .. "\n" .. detail
+      vim.schedule(function()
+        append_lines(progress.buf, lines)
+        checktime()
+      end)
+    end,
+    on_stderr = function(_, data)
+      local lines = normalize_job_lines(data)
+      if #lines == 0 then
+        return
       end
-      notify(message, vim.log.levels.ERROR)
-    end)
-  end)
+
+      vim.list_extend(stderr, lines)
+      vim.schedule(function()
+        append_lines(progress.buf, lines)
+        checktime()
+      end)
+    end,
+    on_exit = function(_, code)
+      vim.schedule(function()
+        stop_reload_timer(reload_timer)
+        checktime()
+
+        if code == 0 then
+          append_lines(progress.buf, { "", "Codex finished successfully." })
+          if M.config.close_progress_on_success and vim.api.nvim_win_is_valid(progress.win) then
+            vim.api.nvim_win_close(progress.win, true)
+          end
+          notify("Codex finished and files were checked for reload", vim.log.levels.INFO)
+          return
+        end
+
+        append_lines(progress.buf, { "", "Codex failed with exit code " .. code .. "." })
+
+        local detail = table.concat(vim.list_slice(stderr, 1, 3), "\n")
+        local message = "Codex failed with exit code " .. code
+        if detail ~= "" then
+          message = message .. "\n" .. detail
+        end
+        notify(message, vim.log.levels.ERROR)
+      end)
+    end,
+  })
+
+  if job_id <= 0 then
+    stop_reload_timer(reload_timer)
+    append_lines(progress.buf, { "Failed to start Codex job." })
+    notify("Failed to start Codex job", vim.log.levels.ERROR)
+    return
+  end
+
+  vim.fn.chansend(job_id, prompt)
+  vim.fn.chanclose(job_id, "stdin")
+end
+
+function M._test_normalize_job_lines(data)
+  return normalize_job_lines(data)
+end
+
+function M._test_append_lines(buf, lines)
+  return append_lines(buf, lines)
+end
+
+function M._test_open_progress()
+  return open_progress()
 end
 
 local function submit_prompt(win, buf, context)
