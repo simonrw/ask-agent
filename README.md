@@ -52,6 +52,13 @@ Select a block in visual mode and run:
 :CodexApplySelection
 ```
 
+This opens a floating prompt window. To run immediately with an inline prompt,
+pass it as command arguments:
+
+```vim
+:CodexApplySelection rename this function and update call sites
+```
+
 Recommended mapping:
 
 ```lua

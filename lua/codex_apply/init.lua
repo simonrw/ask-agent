@@ -383,7 +383,18 @@ local function open_prompt(context)
   vim.cmd.startinsert()
 end
 
-function M.apply_selection()
+local function run_or_prompt(context, initial_prompt)
+  initial_prompt = vim.trim(initial_prompt or "")
+
+  if initial_prompt ~= "" then
+    run_codex(M.build_prompt(initial_prompt, context), context.repo_root)
+    return
+  end
+
+  open_prompt(context)
+end
+
+function M.apply_selection(initial_prompt)
   local file_path = vim.api.nvim_buf_get_name(0)
   if file_path == "" then
     notify("Current buffer has no file path", vim.log.levels.ERROR)
@@ -407,21 +418,21 @@ function M.apply_selection()
     relative_path = string.sub(file_path, #repo_root + 2)
   end
 
-  open_prompt({
+  run_or_prompt({
     repo_root = repo_root,
     relative_path = relative_path,
     start_line = selection.start_line,
     end_line = selection.end_line,
     selected_text = selection.text,
-  })
+  }, initial_prompt)
 end
 
 function M.setup(opts)
   M.config = vim.tbl_deep_extend("force", vim.deepcopy(defaults), opts or {})
 
-  vim.api.nvim_create_user_command("CodexApplySelection", function()
-    M.apply_selection()
-  end, { range = true, desc = "Ask Codex to change the visual selection in place" })
+  vim.api.nvim_create_user_command("CodexApplySelection", function(command)
+    M.apply_selection(command.args)
+  end, { nargs = "*", range = true, desc = "Ask Codex to change the visual selection in place" })
 end
 
 return M
