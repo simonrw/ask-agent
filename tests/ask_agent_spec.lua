@@ -1,14 +1,14 @@
-local codex_apply = require("codex_apply")
+local ask_agent = require("ask-agent")
 
-describe("codex_apply", function()
+describe("ask-agent", function()
   before_each(function()
-    codex_apply.setup({
+    ask_agent.setup({
       notify = function() end,
     })
   end)
 
   it("builds codex exec args", function()
-    local args = codex_apply.build_args("/tmp/repo")
+    local args = ask_agent.build_args("/tmp/repo")
 
     assert.are.same({
       "exec",
@@ -21,7 +21,7 @@ describe("codex_apply", function()
   end)
 
   it("builds a prompt with selection context", function()
-    local prompt = codex_apply.build_prompt("rename this", {
+    local prompt = ask_agent.build_prompt("rename this", {
       relative_path = "lua/example.lua",
       start_line = 3,
       end_line = 5,
@@ -35,25 +35,25 @@ describe("codex_apply", function()
   end)
 
   it("shows nothing in the statusline before codex logs exist", function()
-    assert.are.equal("", codex_apply.statusline())
+    assert.are.equal("", ask_agent.statusline())
   end)
 
   it("shows spinner and last message while codex is running", function()
-    codex_apply.setup({
+    ask_agent.setup({
       notify = function() end,
       status_spinner = { "-", "\\" },
     })
 
-    codex_apply.state.running = true
-    codex_apply.state.spinner_index = 2
-    codex_apply._test_append_log_lines({ "working" })
+    ask_agent.state.running = true
+    ask_agent.state.spinner_index = 2
+    ask_agent._test_append_log_lines({ "working" })
 
-    assert.are.equal("Codex \\ working", codex_apply.statusline())
+    assert.are.equal("Codex \\ working", ask_agent.statusline())
   end)
 
   it("shows nothing after codex stops", function()
-    codex_apply._test_append_log_lines({ "done" })
+    ask_agent._test_append_log_lines({ "done" })
 
-    assert.are.equal("", codex_apply.statusline())
+    assert.are.equal("", ask_agent.statusline())
   end)
 end)

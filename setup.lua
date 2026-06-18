@@ -1,9 +1,9 @@
 vim.cmd([[set rtp+=.]])
 
-require("codex_apply").setup()
+require("ask-agent").setup()
 
-codex_apply_statusline = function()
-    return require("codex_apply").statusline()
+ask_agent_statusline = function()
+    return require("ask-agent").statusline()
 end
 
-vim.o.statusline = vim.o.statusline .. " %{v:lua.codex_apply_statusline()}"
+vim.o.statusline = vim.o.statusline .. " %{v:lua.ask_agent_statusline()}"

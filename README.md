@@ -1,4 +1,4 @@
-# codex-apply.nvim
+# ask-agent.nvim
 
 Select code in visual mode, write an instruction in a floating prompt, and let
 the Codex CLI implement the change in place.
@@ -28,9 +28,9 @@ With `lazy.nvim`:
 
 ```lua
 {
-  "your-name/codex-apply.nvim",
+  "your-name/ask-agent.nvim",
   config = function()
-    require("codex_apply").setup()
+    require("ask-agent").setup()
   end,
 }
 ```
@@ -41,7 +41,7 @@ For local development:
 {
   dir = "/home/simon/dev/ask-agent",
   config = function()
-    require("codex_apply").setup()
+    require("ask-agent").setup()
   end,
 }
 ```
@@ -79,17 +79,17 @@ Prompt window keys:
 Show the Codex status in your statusline with:
 
 ```lua
-require("codex_apply").statusline()
+require("ask-agent").statusline()
 ```
 
 For example:
 
 ```lua
-_G.codex_apply_statusline = function()
-  return require("codex_apply").statusline()
+_G.ask_agent_statusline = function()
+  return require("ask-agent").statusline()
 end
 
-vim.o.statusline = vim.o.statusline .. " %{v:lua.codex_apply_statusline()}"
+vim.o.statusline = vim.o.statusline .. " %{v:lua.ask_agent_statusline()}"
 ```
 
 Open logs only when needed:
@@ -105,7 +105,7 @@ Log window keys:
 ## Configuration
 
 ```lua
-require("codex_apply").setup({
+require("ask-agent").setup({
   codex_cmd = "codex",
   sandbox = "workspace-write",
   model = nil,

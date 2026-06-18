@@ -28,7 +28,7 @@ M.state = {
 }
 
 local function notify(message, level)
-  M.config.notify(message, level or vim.log.levels.INFO, { title = "codex-apply" })
+  M.config.notify(message, level or vim.log.levels.INFO, { title = "ask-agent" })
 end
 
 local function path_join(...)
