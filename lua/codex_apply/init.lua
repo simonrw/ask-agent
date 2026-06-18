@@ -8,13 +8,24 @@ local defaults = {
   notify = vim.notify,
   prompt_width = 72,
   prompt_height = 10,
-  progress_height_ratio = 0.33,
-  close_progress_on_success = false,
+  status_spinner = { "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏" },
+  status_update_interval_ms = 120,
+  status_max_message_length = 80,
+  log_height_ratio = 0.33,
+  max_log_lines = 1000,
   live_reload = true,
   live_reload_interval_ms = 1000,
 }
 
 M.config = vim.deepcopy(defaults)
+M.state = {
+  running = false,
+  last_message = "",
+  spinner_index = 1,
+  has_codex_output = false,
+  logs = {},
+  log_buffers = {},
+}
 
 local function notify(message, level)
   M.config.notify(message, level or vim.log.levels.INFO, { title = "codex-apply" })
@@ -166,6 +177,39 @@ local function append_lines(buf, lines)
   end
 end
 
+local function append_log_lines(lines, update_last_message)
+  if not lines or #lines == 0 then
+    return
+  end
+  if update_last_message == nil then
+    update_last_message = true
+  end
+
+  local valid_log_buffers = {}
+  for _, line in ipairs(lines) do
+    table.insert(M.state.logs, line)
+    if update_last_message then
+      M.state.last_message = line
+      M.state.has_codex_output = true
+    end
+  end
+
+  for _, buf in ipairs(M.state.log_buffers) do
+    if vim.api.nvim_buf_is_valid(buf) then
+      append_lines(buf, lines)
+      table.insert(valid_log_buffers, buf)
+    end
+  end
+  M.state.log_buffers = valid_log_buffers
+
+  local overflow = #M.state.logs - M.config.max_log_lines
+  if overflow > 0 then
+    for _ = 1, overflow do
+      table.remove(M.state.logs, 1)
+    end
+  end
+end
+
 local function normalize_job_lines(data)
   local lines = {}
   for _, line in ipairs(data or {}) do
@@ -182,9 +226,9 @@ local function checktime()
   end
 end
 
-local function open_progress()
+local function open_logs()
   local previous_win = vim.api.nvim_get_current_win()
-  local height = math.max(3, math.floor(vim.o.lines * M.config.progress_height_ratio))
+  local height = math.max(3, math.floor(vim.o.lines * M.config.log_height_ratio))
 
   vim.cmd("botright " .. height .. "split")
   local win = vim.api.nvim_get_current_win()
@@ -194,7 +238,7 @@ local function open_progress()
   vim.api.nvim_set_option_value("buftype", "nofile", { buf = buf })
   vim.api.nvim_set_option_value("bufhidden", "wipe", { buf = buf })
   vim.api.nvim_set_option_value("swapfile", false, { buf = buf })
-  vim.api.nvim_set_option_value("filetype", "codex-progress", { buf = buf })
+  vim.api.nvim_set_option_value("filetype", "codex-log", { buf = buf })
   vim.api.nvim_set_option_value("modifiable", false, { buf = buf })
   vim.api.nvim_set_option_value("wrap", true, { win = win })
 
@@ -202,15 +246,95 @@ local function open_progress()
     if vim.api.nvim_win_is_valid(win) then
       vim.api.nvim_win_close(win, true)
     end
-  end, { buffer = buf, silent = true, desc = "Close Codex progress" })
+  end, { buffer = buf, silent = true, desc = "Close Codex logs" })
 
-  append_lines(buf, { "Codex started..." })
+  if #M.state.logs == 0 then
+    append_lines(buf, { "No Codex logs yet." })
+  else
+    append_lines(buf, M.state.logs)
+  end
+  table.insert(M.state.log_buffers, buf)
 
   if vim.api.nvim_win_is_valid(previous_win) then
     vim.api.nvim_set_current_win(previous_win)
   end
 
   return { buf = buf, win = win }
+end
+
+local function redrawstatus()
+  vim.cmd.redrawstatus()
+end
+
+local function spinner_frames()
+  local frames = M.config.status_spinner or defaults.status_spinner
+  if #frames == 0 then
+    return defaults.status_spinner
+  end
+  return frames
+end
+
+local function start_status_timer()
+  local timer = vim.loop.new_timer()
+  timer:start(M.config.status_update_interval_ms, M.config.status_update_interval_ms, function()
+    vim.schedule(function()
+      local frames = spinner_frames()
+      M.state.spinner_index = (M.state.spinner_index % #frames) + 1
+      redrawstatus()
+    end)
+  end)
+  return timer
+end
+
+local function stop_status_timer(timer)
+  if not timer then
+    return
+  end
+
+  timer:stop()
+  timer:close()
+  redrawstatus()
+end
+
+local function reset_run_state()
+  M.state.running = true
+  M.state.last_message = "Codex started"
+  M.state.spinner_index = 1
+  M.state.has_codex_output = false
+  M.state.logs = {}
+  for _, buf in ipairs(M.state.log_buffers) do
+    if vim.api.nvim_buf_is_valid(buf) then
+      vim.api.nvim_set_option_value("modifiable", true, { buf = buf })
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, {})
+      vim.api.nvim_set_option_value("modifiable", false, { buf = buf })
+    end
+  end
+  append_log_lines({ "Codex started..." }, false)
+end
+
+local function truncate_message(message)
+  local max = M.config.status_max_message_length
+  if not max or max <= 0 or #message <= max then
+    return message
+  end
+
+  return string.sub(message, 1, math.max(1, max - 3)) .. "..."
+end
+
+function M.statusline()
+  if not M.state.running then
+    return ""
+  end
+
+  local message = truncate_message(M.state.last_message or "")
+  message = message:gsub("%%", "%%%%")
+
+  local frames = spinner_frames()
+  local spinner = frames[M.state.spinner_index] or frames[1] or "*"
+  if message == "" then
+    return "Codex " .. spinner
+  end
+  return "Codex " .. spinner .. " " .. message
 end
 
 local function start_reload_timer()
@@ -241,14 +365,15 @@ local function run_codex(prompt, repo_root)
 
   local args = M.build_args(repo_root)
   local stderr = {}
-  local progress = open_progress()
   local reload_timer = start_reload_timer()
 
-  notify("Codex started", vim.log.levels.INFO)
+  reset_run_state()
+  local status_timer = start_status_timer()
+  redrawstatus()
 
   local job_id = vim.fn.jobstart(vim.list_extend({ M.config.codex_cmd }, args), {
     cwd = repo_root,
-    stdout_buffered = true,
+    stdout_buffered = false,
     stderr_buffered = false,
     on_stdout = function(_, data)
       local lines = normalize_job_lines(data)
@@ -257,8 +382,9 @@ local function run_codex(prompt, repo_root)
       end
 
       vim.schedule(function()
-        append_lines(progress.buf, lines)
+        append_log_lines(lines)
         checktime()
+        redrawstatus()
       end)
     end,
     on_stderr = function(_, data)
@@ -269,25 +395,32 @@ local function run_codex(prompt, repo_root)
 
       vim.list_extend(stderr, lines)
       vim.schedule(function()
-        append_lines(progress.buf, lines)
+        append_log_lines(lines)
         checktime()
+        redrawstatus()
       end)
     end,
     on_exit = function(_, code)
       vim.schedule(function()
         stop_reload_timer(reload_timer)
+        M.state.running = false
+        stop_status_timer(status_timer)
         checktime()
 
         if code == 0 then
-          append_lines(progress.buf, { "", "Codex finished successfully." })
-          if M.config.close_progress_on_success and vim.api.nvim_win_is_valid(progress.win) then
-            vim.api.nvim_win_close(progress.win, true)
+          append_log_lines({ "", "Codex finished successfully." }, false)
+          if not M.state.has_codex_output then
+            M.state.last_message = "Codex finished successfully."
           end
-          notify("Codex finished and files were checked for reload", vim.log.levels.INFO)
+          redrawstatus()
           return
         end
 
-        append_lines(progress.buf, { "", "Codex failed with exit code " .. code .. "." })
+        append_log_lines({ "", "Codex failed with exit code " .. code .. "." }, false)
+        if not M.state.has_codex_output then
+          M.state.last_message = "Codex failed with exit code " .. code .. "."
+        end
+        redrawstatus()
 
         local detail = table.concat(vim.list_slice(stderr, 1, 3), "\n")
         local message = "Codex failed with exit code " .. code
@@ -301,7 +434,11 @@ local function run_codex(prompt, repo_root)
 
   if job_id <= 0 then
     stop_reload_timer(reload_timer)
-    append_lines(progress.buf, { "Failed to start Codex job." })
+    M.state.running = false
+    stop_status_timer(status_timer)
+    append_log_lines({ "Failed to start Codex job." }, false)
+    M.state.last_message = "Failed to start Codex job."
+    redrawstatus()
     notify("Failed to start Codex job", vim.log.levels.ERROR)
     return
   end
@@ -318,8 +455,12 @@ function M._test_append_lines(buf, lines)
   return append_lines(buf, lines)
 end
 
-function M._test_open_progress()
-  return open_progress()
+function M._test_append_log_lines(lines)
+  return append_log_lines(lines)
+end
+
+function M._test_open_logs()
+  return open_logs()
 end
 
 local function submit_prompt(win, buf, context)
@@ -429,10 +570,20 @@ end
 
 function M.setup(opts)
   M.config = vim.tbl_deep_extend("force", vim.deepcopy(defaults), opts or {})
+  M.state.running = false
+  M.state.last_message = ""
+  M.state.spinner_index = 1
+  M.state.has_codex_output = false
+  M.state.logs = {}
+  M.state.log_buffers = {}
 
   vim.api.nvim_create_user_command("CodexApplySelection", function(command)
     M.apply_selection(command.args)
   end, { nargs = "*", range = true, desc = "Ask Codex to change the visual selection in place" })
+
+  vim.api.nvim_create_user_command("CodexApplyLogs", function()
+    open_logs()
+  end, { desc = "Open Codex apply logs" })
 end
 
 return M
