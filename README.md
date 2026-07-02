@@ -51,20 +51,20 @@ For local development:
 Select a block in visual mode and run:
 
 ```vim
-:CodexApplySelection
+:AskAgent
 ```
 
 This opens a floating prompt window. To run immediately with an inline prompt,
 pass it as command arguments:
 
 ```vim
-:CodexApplySelection rename this function and update call sites
+:AskAgent rename this function and update call sites
 ```
 
 Recommended mapping:
 
 ```lua
-vim.keymap.set("v", "<leader>ca", ":CodexApplySelection<CR>", {
+vim.keymap.set("v", "<leader>ca", ":AskAgent<CR>", {
   desc = "Ask Codex to change selection",
 })
 ```
@@ -95,7 +95,7 @@ vim.o.statusline = vim.o.statusline .. " %{v:lua.ask_agent_statusline()}"
 Open logs only when needed:
 
 ```vim
-:CodexApplyLogs
+:AskAgentLogs
 ```
 
 Log window keys:

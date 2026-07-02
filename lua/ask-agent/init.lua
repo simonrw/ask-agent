@@ -544,7 +544,7 @@ function M.apply_selection(initial_prompt)
 
   local repo_root = M.find_repo_root(file_path)
   if not repo_root then
-    notify("CodexApplySelection requires a Git repository", vim.log.levels.ERROR)
+    notify("AskAgent requires a Git repository", vim.log.levels.ERROR)
     return
   end
 
@@ -577,11 +577,11 @@ function M.setup(opts)
   M.state.logs = {}
   M.state.log_buffers = {}
 
-  vim.api.nvim_create_user_command("CodexApplySelection", function(command)
+  vim.api.nvim_create_user_command("AskAgent", function(command)
     M.apply_selection(command.args)
   end, { nargs = "*", range = true, desc = "Ask Codex to change the visual selection in place" })
 
-  vim.api.nvim_create_user_command("CodexApplyLogs", function()
+  vim.api.nvim_create_user_command("AskAgentLogs", function()
     open_logs()
   end, { desc = "Open Codex apply logs" })
 end
