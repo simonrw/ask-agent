@@ -65,6 +65,10 @@ function M.find_repo_root(start_path)
   return nil
 end
 
+function M.find_workspace_root(start_path)
+  return M.find_repo_root(start_path) or vim.fn.getcwd()
+end
+
 local function normalize_range(start_pos, end_pos)
   local start_line = start_pos[2]
   local start_col = start_pos[3]
@@ -119,7 +123,7 @@ end
 
 function M.build_prompt(user_prompt, context)
   return table.concat({
-    "You are editing a repository from Neovim through Codex non-interactive mode.",
+    "You are editing a workspace from Neovim through Codex non-interactive mode.",
     "",
     "User instruction:",
     user_prompt,
@@ -133,7 +137,7 @@ function M.build_prompt(user_prompt, context)
     context.selected_text,
     "```",
     "",
-    "Implement the requested change directly in the repository.",
+    "Implement the requested change directly in the workspace.",
     "Use the selected text as the focus, but update related files when needed.",
     "Keep the change minimal and avoid unrelated refactors.",
   }, "\n")
@@ -542,11 +546,7 @@ function M.apply_selection(initial_prompt)
     return
   end
 
-  local repo_root = M.find_repo_root(file_path)
-  if not repo_root then
-    notify("AskAgent requires a Git repository", vim.log.levels.ERROR)
-    return
-  end
+  local repo_root = M.find_workspace_root(file_path)
 
   local selection, err = M.get_visual_selection(0)
   if err then

@@ -20,6 +20,27 @@ describe("ask-agent", function()
     }, args)
   end)
 
+  it("uses a git repository as the workspace root when one is found", function()
+    local dir = vim.fn.tempname()
+    vim.fn.mkdir(dir .. "/.git", "p")
+    vim.fn.mkdir(dir .. "/lua", "p")
+
+    assert.are.equal(dir, ask_agent.find_workspace_root(dir .. "/lua/example.lua"))
+  end)
+
+  it("falls back to cwd as the workspace root outside a git repository", function()
+    local previous_cwd = vim.fn.getcwd()
+    local dir = vim.fn.tempname()
+    vim.fn.mkdir(dir, "p")
+    vim.cmd("cd " .. vim.fn.fnameescape(dir))
+    local expected_root = vim.fn.getcwd()
+
+    local root = ask_agent.find_workspace_root(dir .. "/example.lua")
+
+    vim.cmd("cd " .. vim.fn.fnameescape(previous_cwd))
+    assert.are.equal(expected_root, root)
+  end)
+
   it("builds a prompt with selection context", function()
     local prompt = ask_agent.build_prompt("rename this", {
       relative_path = "lua/example.lua",

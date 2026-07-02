@@ -1,26 +1,19 @@
 # ask-agent.nvim
 
-Select code in visual mode, write an instruction in a floating prompt, and let
-the Codex CLI implement the change in place.
+Select code in visual mode, write an instruction in a floating prompt, and let the Codex CLI implement the change in place.
 
 The plugin uses Codex non-interactive mode:
 
 ```sh
-codex exec --sandbox workspace-write --cd <repo-root> -
+codex exec --sandbox workspace-write --cd <workspace-root> -
 ```
 
-Codex reads the generated prompt from stdin. The selected text is included as
-focus context, and Codex may edit related files in the Git repository.
-While Codex runs, the statusline can show an animated spinner plus the latest
-Codex output, then disappear when Codex exits. Neovim checks for file changes
-so edited buffers can refresh during the run. Logs stay hidden unless you open
-them.
+Codex reads the generated prompt from stdin. The selected text is included as focus context, and Codex may edit related files in the workspace. If the current file is inside a Git repository, ask-agent uses that repository root as the workspace root. Otherwise, it uses Neovim's current working directory. While Codex runs, the statusline can show an animated spinner plus the latest Codex output, then disappear when Codex exits. Neovim checks for file changes so edited buffers can refresh during the run. Logs stay hidden unless you open them.
 
 ## Requirements
 
 - Neovim 0.10 or newer
 - `codex` CLI available on `$PATH`
-- A Git repository
 
 ## Installation
 
@@ -123,9 +116,6 @@ require("ask-agent").setup({
 })
 ```
 
-Live reload uses `:checktime`, so Neovim can update buffers as soon as Codex
-writes files. This works best with unmodified buffers; the plugin saves the
-current buffer before launching Codex.
+Live reload uses `:checktime`, so Neovim can update buffers as soon as Codex writes files. This works best with unmodified buffers; the plugin saves the current buffer before launching Codex.
 
-The plugin refuses to run outside a Git repository, matching Codex's default
-safety model.
+The workspace root is the enclosing Git repository when one exists, otherwise Neovim's current working directory.
