@@ -99,6 +99,7 @@ Log window keys:
 
 ```lua
 require("ask-agent").setup({
+  provider = "codex",
   codex_cmd = "codex",
   sandbox = "workspace-write",
   model = nil,

@@ -1,6 +1,7 @@
 local M = {}
 
 local defaults = {
+  provider = "codex",
   codex_cmd = "codex",
   sandbox = "workspace-write",
   model = nil,
@@ -22,10 +23,49 @@ M.state = {
   running = false,
   last_message = "",
   spinner_index = 1,
-  has_codex_output = false,
+  has_agent_output = false,
   logs = {},
   log_buffers = {},
 }
+
+-- The single provider seam. Each entry describes everything provider-specific:
+--   cmd            - default command name (overridable via cmd_config_key)
+--   cmd_config_key - config key that overrides the command (back-compat)
+--   label          - display name used in statusline, prompt, and log strings
+--   build_args     - returns the argv (excluding the command itself) for a run
+-- The rest of the plugin is provider-agnostic and reads from the active spec.
+M.providers = {
+  codex = {
+    cmd = "codex",
+    cmd_config_key = "codex_cmd",
+    label = "Codex",
+    build_args = function(root)
+      local args = { "exec", "--sandbox", M.config.sandbox, "--cd", root }
+
+      if M.config.model and M.config.model ~= "" then
+        vim.list_extend(args, { "--model", M.config.model })
+      end
+
+      vim.list_extend(args, M.config.extra_args or {})
+      table.insert(args, "-")
+
+      return args
+    end,
+  },
+}
+
+local function provider_spec()
+  return M.providers[M.config.provider] or M.providers[defaults.provider]
+end
+
+local function provider_label()
+  return provider_spec().label
+end
+
+local function provider_cmd()
+  local spec = provider_spec()
+  return M.config[spec.cmd_config_key] or spec.cmd
+end
 
 local function notify(message, level)
   M.config.notify(message, level or vim.log.levels.INFO, { title = "ask-agent" })
@@ -123,7 +163,7 @@ end
 
 function M.build_prompt(user_prompt, context)
   return table.concat({
-    "You are editing a workspace from Neovim through Codex non-interactive mode.",
+    "You are editing a workspace from Neovim through " .. provider_label() .. " non-interactive mode.",
     "",
     "User instruction:",
     user_prompt,
@@ -144,16 +184,7 @@ function M.build_prompt(user_prompt, context)
 end
 
 function M.build_args(repo_root)
-  local args = { "exec", "--sandbox", M.config.sandbox, "--cd", repo_root }
-
-  if M.config.model and M.config.model ~= "" then
-    vim.list_extend(args, { "--model", M.config.model })
-  end
-
-  vim.list_extend(args, M.config.extra_args or {})
-  table.insert(args, "-")
-
-  return args
+  return provider_spec().build_args(repo_root)
 end
 
 local function close_prompt(win, buf)
@@ -194,7 +225,7 @@ local function append_log_lines(lines, update_last_message)
     table.insert(M.state.logs, line)
     if update_last_message then
       M.state.last_message = line
-      M.state.has_codex_output = true
+      M.state.has_agent_output = true
     end
   end
 
@@ -242,7 +273,8 @@ local function open_logs()
   vim.api.nvim_set_option_value("buftype", "nofile", { buf = buf })
   vim.api.nvim_set_option_value("bufhidden", "wipe", { buf = buf })
   vim.api.nvim_set_option_value("swapfile", false, { buf = buf })
-  vim.api.nvim_set_option_value("filetype", "codex-log", { buf = buf })
+  local label = provider_label()
+  vim.api.nvim_set_option_value("filetype", M.config.provider .. "-log", { buf = buf })
   vim.api.nvim_set_option_value("modifiable", false, { buf = buf })
   vim.api.nvim_set_option_value("wrap", true, { win = win })
 
@@ -250,10 +282,10 @@ local function open_logs()
     if vim.api.nvim_win_is_valid(win) then
       vim.api.nvim_win_close(win, true)
     end
-  end, { buffer = buf, silent = true, desc = "Close Codex logs" })
+  end, { buffer = buf, silent = true, desc = "Close " .. label .. " logs" })
 
   if #M.state.logs == 0 then
-    append_lines(buf, { "No Codex logs yet." })
+    append_lines(buf, { "No " .. label .. " logs yet." })
   else
     append_lines(buf, M.state.logs)
   end
@@ -301,10 +333,11 @@ local function stop_status_timer(timer)
 end
 
 local function reset_run_state()
+  local label = provider_label()
   M.state.running = true
-  M.state.last_message = "Codex started"
+  M.state.last_message = label .. " started"
   M.state.spinner_index = 1
-  M.state.has_codex_output = false
+  M.state.has_agent_output = false
   M.state.logs = {}
   for _, buf in ipairs(M.state.log_buffers) do
     if vim.api.nvim_buf_is_valid(buf) then
@@ -313,7 +346,7 @@ local function reset_run_state()
       vim.api.nvim_set_option_value("modifiable", false, { buf = buf })
     end
   end
-  append_log_lines({ "Codex started..." }, false)
+  append_log_lines({ label .. " started..." }, false)
 end
 
 local function truncate_message(message)
@@ -335,10 +368,11 @@ function M.statusline()
 
   local frames = spinner_frames()
   local spinner = frames[M.state.spinner_index] or frames[1] or "*"
+  local label = provider_label()
   if message == "" then
-    return "Codex " .. spinner
+    return label .. " " .. spinner
   end
-  return "Codex " .. spinner .. " " .. message
+  return label .. " " .. spinner .. " " .. message
 end
 
 local function start_reload_timer()
@@ -362,11 +396,12 @@ local function stop_reload_timer(timer)
   timer:close()
 end
 
-local function run_codex(prompt, repo_root)
+local function run_agent(prompt, repo_root)
   if vim.bo.modified then
     vim.cmd.write()
   end
 
+  local label = provider_label()
   local args = M.build_args(repo_root)
   local stderr = {}
   local reload_timer = start_reload_timer()
@@ -375,7 +410,7 @@ local function run_codex(prompt, repo_root)
   local status_timer = start_status_timer()
   redrawstatus()
 
-  local job_id = vim.fn.jobstart(vim.list_extend({ M.config.codex_cmd }, args), {
+  local job_id = vim.fn.jobstart(vim.list_extend({ provider_cmd() }, args), {
     cwd = repo_root,
     stdout_buffered = false,
     stderr_buffered = false,
@@ -412,22 +447,22 @@ local function run_codex(prompt, repo_root)
         checktime()
 
         if code == 0 then
-          append_log_lines({ "", "Codex finished successfully." }, false)
-          if not M.state.has_codex_output then
-            M.state.last_message = "Codex finished successfully."
+          append_log_lines({ "", label .. " finished successfully." }, false)
+          if not M.state.has_agent_output then
+            M.state.last_message = label .. " finished successfully."
           end
           redrawstatus()
           return
         end
 
-        append_log_lines({ "", "Codex failed with exit code " .. code .. "." }, false)
-        if not M.state.has_codex_output then
-          M.state.last_message = "Codex failed with exit code " .. code .. "."
+        append_log_lines({ "", label .. " failed with exit code " .. code .. "." }, false)
+        if not M.state.has_agent_output then
+          M.state.last_message = label .. " failed with exit code " .. code .. "."
         end
         redrawstatus()
 
         local detail = table.concat(vim.list_slice(stderr, 1, 3), "\n")
-        local message = "Codex failed with exit code " .. code
+        local message = label .. " failed with exit code " .. code
         if detail ~= "" then
           message = message .. "\n" .. detail
         end
@@ -440,10 +475,10 @@ local function run_codex(prompt, repo_root)
     stop_reload_timer(reload_timer)
     M.state.running = false
     stop_status_timer(status_timer)
-    append_log_lines({ "Failed to start Codex job." }, false)
-    M.state.last_message = "Failed to start Codex job."
+    append_log_lines({ "Failed to start " .. label .. " job." }, false)
+    M.state.last_message = "Failed to start " .. label .. " job."
     redrawstatus()
-    notify("Failed to start Codex job", vim.log.levels.ERROR)
+    notify("Failed to start " .. label .. " job", vim.log.levels.ERROR)
     return
   end
 
@@ -478,7 +513,7 @@ local function submit_prompt(win, buf, context)
   end
 
   close_prompt(win, buf)
-  run_codex(M.build_prompt(user_prompt, context), context.repo_root)
+  run_agent(M.build_prompt(user_prompt, context), context.repo_root)
 end
 
 local function open_prompt(context)
@@ -500,7 +535,7 @@ local function open_prompt(context)
     col = col,
     style = "minimal",
     border = "rounded",
-    title = " Codex prompt ",
+    title = " " .. provider_label() .. " prompt ",
     title_pos = "center",
   })
 
@@ -509,7 +544,7 @@ local function open_prompt(context)
 
   vim.keymap.set({ "n", "i" }, "<Esc>", function()
     close_prompt(win, buf)
-    notify("Codex prompt cancelled", vim.log.levels.INFO)
+    notify(provider_label() .. " prompt cancelled", vim.log.levels.INFO)
   end, { buffer = buf, silent = true, nowait = true })
 
   vim.keymap.set("n", "<CR>", function()
@@ -532,7 +567,7 @@ local function run_or_prompt(context, initial_prompt)
   initial_prompt = vim.trim(initial_prompt or "")
 
   if initial_prompt ~= "" then
-    run_codex(M.build_prompt(initial_prompt, context), context.repo_root)
+    run_agent(M.build_prompt(initial_prompt, context), context.repo_root)
     return
   end
 
@@ -570,20 +605,33 @@ end
 
 function M.setup(opts)
   M.config = vim.tbl_deep_extend("force", vim.deepcopy(defaults), opts or {})
+
+  if not M.providers[M.config.provider] then
+    local known = table.concat(vim.tbl_keys(M.providers), ", ")
+    local message = string.format(
+      "ask-agent: unknown provider '%s' (known providers: %s)",
+      tostring(M.config.provider),
+      known
+    )
+    notify(message, vim.log.levels.ERROR)
+    error(message, 0)
+  end
+
+  local label = provider_label()
   M.state.running = false
   M.state.last_message = ""
   M.state.spinner_index = 1
-  M.state.has_codex_output = false
+  M.state.has_agent_output = false
   M.state.logs = {}
   M.state.log_buffers = {}
 
   vim.api.nvim_create_user_command("AskAgent", function(command)
     M.apply_selection(command.args)
-  end, { nargs = "*", range = true, desc = "Ask Codex to change the visual selection in place" })
+  end, { nargs = "*", range = true, desc = "Ask " .. label .. " to change the visual selection in place" })
 
   vim.api.nvim_create_user_command("AskAgentLogs", function()
     open_logs()
-  end, { desc = "Open Codex apply logs" })
+  end, { desc = "Open " .. label .. " apply logs" })
 end
 
 return M
