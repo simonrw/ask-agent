@@ -3,6 +3,7 @@ local M = {}
 local defaults = {
   provider = "codex",
   codex_cmd = "codex",
+  claude_cmd = "claude",
   sandbox = "workspace-write",
   model = nil,
   extra_args = {},
@@ -28,6 +29,16 @@ M.state = {
   log_buffers = {},
 }
 
+local function append_model_and_extra_args(args)
+  if M.config.model and M.config.model ~= "" then
+    vim.list_extend(args, { "--model", M.config.model })
+  end
+
+  vim.list_extend(args, M.config.extra_args or {})
+
+  return args
+end
+
 -- The single provider seam. Each entry describes everything provider-specific:
 --   cmd            - default command name (overridable via cmd_config_key)
 --   cmd_config_key - config key that overrides the command (back-compat)
@@ -41,15 +52,19 @@ M.providers = {
     label = "Codex",
     build_args = function(root)
       local args = { "exec", "--sandbox", M.config.sandbox, "--cd", root }
-
-      if M.config.model and M.config.model ~= "" then
-        vim.list_extend(args, { "--model", M.config.model })
-      end
-
-      vim.list_extend(args, M.config.extra_args or {})
+      append_model_and_extra_args(args)
       table.insert(args, "-")
 
       return args
+    end,
+  },
+  claude = {
+    cmd = "claude",
+    cmd_config_key = "claude_cmd",
+    label = "Claude",
+    build_args = function(root)
+      local args = { "-p", "--permission-mode", "acceptEdits", "--add-dir", root }
+      return append_model_and_extra_args(args)
     end,
   },
 }
@@ -500,6 +515,10 @@ end
 
 function M._test_open_logs()
   return open_logs()
+end
+
+function M._test_provider_cmd()
+  return provider_cmd()
 end
 
 local function submit_prompt(win, buf, context)

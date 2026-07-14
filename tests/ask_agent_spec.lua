@@ -126,6 +126,94 @@ describe("ask-agent", function()
     assert.are.equal("", ask_agent.statusline())
   end)
 
+  it("builds claude args by default", function()
+    ask_agent.setup({
+      notify = function() end,
+      provider = "claude",
+    })
+
+    local args = ask_agent.build_args("/tmp/repo")
+
+    assert.are.same({
+      "-p",
+      "--permission-mode",
+      "acceptEdits",
+      "--add-dir",
+      "/tmp/repo",
+    }, args)
+  end)
+
+  it("appends model and extra_args to claude args in the right place", function()
+    ask_agent.setup({
+      notify = function() end,
+      provider = "claude",
+      model = "claude-opus-4",
+      extra_args = { "--verbose" },
+    })
+
+    local args = ask_agent.build_args("/tmp/repo")
+
+    assert.are.same({
+      "-p",
+      "--permission-mode",
+      "acceptEdits",
+      "--add-dir",
+      "/tmp/repo",
+      "--model",
+      "claude-opus-4",
+      "--verbose",
+    }, args)
+  end)
+
+  it("defaults the claude command to claude", function()
+    ask_agent.setup({
+      notify = function() end,
+      provider = "claude",
+    })
+
+    assert.are.equal("claude", ask_agent._test_provider_cmd())
+  end)
+
+  it("overrides the claude command via claude_cmd", function()
+    ask_agent.setup({
+      notify = function() end,
+      provider = "claude",
+      claude_cmd = "my-claude",
+    })
+
+    assert.are.equal("my-claude", ask_agent._test_provider_cmd())
+  end)
+
+  it("leads the prompt with Claude when the claude provider is active", function()
+    ask_agent.setup({
+      notify = function() end,
+      provider = "claude",
+    })
+
+    local prompt = ask_agent.build_prompt("rename this", {
+      relative_path = "lua/example.lua",
+      start_line = 3,
+      end_line = 5,
+      selected_text = "local old = true",
+    })
+
+    assert.is_true(prompt:find("through Claude non-interactive mode", 1, true) ~= nil)
+  end)
+
+  it("shows the Claude label in the statusline while claude is running", function()
+    ask_agent.setup({
+      notify = function() end,
+      provider = "claude",
+      status_spinner = { "-", "\\" },
+    })
+
+    ask_agent.state.running = true
+    ask_agent.state.spinner_index = 2
+    ask_agent._test_append_log_lines({ "working" })
+
+    assert.are.equal("Claude \\ working", ask_agent.statusline())
+  end)
+
   it("raises a clear error for an unknown provider at setup", function()
     local ok, err = pcall(function()
       ask_agent.setup({

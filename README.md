@@ -1,19 +1,25 @@
 # ask-agent.nvim
 
-Select code in visual mode, write an instruction in a floating prompt, and let the Codex CLI implement the change in place.
+Select code in visual mode, write an instruction in a floating prompt, and let Codex or Claude implement the change in place.
 
-The plugin uses Codex non-interactive mode:
+The plugin uses the CLI's non-interactive mode. For Codex:
 
 ```sh
 codex exec --sandbox workspace-write --cd <workspace-root> -
 ```
 
-Codex reads the generated prompt from stdin. The selected text is included as focus context, and Codex may edit related files in the workspace. If the current file is inside a Git repository, ask-agent uses that repository root as the workspace root. Otherwise, it uses Neovim's current working directory. While Codex runs, the statusline can show an animated spinner plus the latest Codex output, then disappear when Codex exits. Neovim checks for file changes so edited buffers can refresh during the run. Logs stay hidden unless you open them.
+For Claude (set `provider = "claude"`):
+
+```sh
+claude -p --permission-mode acceptEdits --add-dir <workspace-root>
+```
+
+The generated prompt is passed over stdin. The selected text is included as focus context, and the agent may edit related files in the workspace. If the current file is inside a Git repository, ask-agent uses that repository root as the workspace root. Otherwise, it uses Neovim's current working directory. While the agent runs, the statusline can show an animated spinner plus the latest output, then disappear when it exits. Neovim checks for file changes so edited buffers can refresh during the run. Logs stay hidden unless you open them.
 
 ## Requirements
 
 - Neovim 0.10 or newer
-- `codex` CLI available on `$PATH`
+- `codex` CLI available on `$PATH` (or `claude` if using the `claude` provider)
 
 ## Installation
 
@@ -99,9 +105,10 @@ Log window keys:
 
 ```lua
 require("ask-agent").setup({
-  provider = "codex",
+  provider = "codex", -- or "claude"
   codex_cmd = "codex",
-  sandbox = "workspace-write",
+  claude_cmd = "claude",
+  sandbox = "workspace-write", -- Codex only
   model = nil,
   extra_args = {},
   notify = vim.notify,
