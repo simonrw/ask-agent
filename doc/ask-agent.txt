@@ -1,0 +1,272 @@
+*ask-agent.txt*  Ask Codex or Claude to change a visual selection in place
+
+==============================================================================
+CONTENTS                                                  *ask-agent-contents*
+
+  1. Introduction ............................... |ask-agent-introduction|
+  2. Requirements ............................... |ask-agent-requirements|
+  3. Setup ...................................... |ask-agent-setup|
+  4. Usage ...................................... |ask-agent-usage|
+  5. Commands ................................... |ask-agent-commands|
+  6. Prompt window .............................. |ask-agent-prompt|
+  7. Statusline ................................. |ask-agent-statusline|
+  8. Logs ....................................... |ask-agent-logs|
+  9. Configuration .............................. |ask-agent-configuration|
+  10. Providers ................................. |ask-agent-providers|
+  11. Workspace root ............................ |ask-agent-workspace-root|
+  12. Lua API ................................... |ask-agent-api|
+
+==============================================================================
+1. INTRODUCTION                                       *ask-agent-introduction*
+
+ask-agent lets you select code in visual mode, write an instruction in a
+floating prompt, and have an agent CLI (Codex or Claude) implement the change
+directly in your workspace.
+
+The agent runs in its non-interactive mode as a background job. The generated
+prompt is sent over stdin and contains your instruction, the file path, the
+selected line range and the selected text. The selection is the focus, but
+the agent may edit related files in the workspace.
+
+While the agent runs, the statusline can show a spinner and the latest output
+line. Neovim periodically runs |:checktime| so edited buffers reload during
+the run. Output is captured in a hidden log you can open on demand.
+
+==============================================================================
+2. REQUIREMENTS                                       *ask-agent-requirements*
+
+- Neovim 0.10 or newer
+- `codex` on `$PATH`, or `claude` when using the `claude` provider
+
+==============================================================================
+3. SETUP                                                     *ask-agent-setup*
+
+The plugin calls `require("ask-agent").setup()` with defaults on startup, so
+|:AskAgent| and |:AskAgentLogs| are available without any configuration.
+
+Call |ask-agent.setup()| yourself to change options. With lazy.nvim: >lua
+
+    {
+      "simonrw/ask-agent",
+      config = function()
+        require("ask-agent").setup({ provider = "claude" })
+      end,
+    }
+<
+Recommended mapping: >lua
+
+    vim.keymap.set("v", "<leader>ca", ":AskAgent<CR>", {
+      desc = "Ask agent to change selection",
+    })
+<
+==============================================================================
+4. USAGE                                                     *ask-agent-usage*
+
+1. Select a block in visual mode (|v|, |V| or |CTRL-V|).
+2. Run |:AskAgent|.
+3. Type an instruction in the floating prompt and press <CR>.
+
+If the current buffer has unsaved changes it is written before the agent
+starts. Live reload works best on unmodified buffers.
+
+Only one statusline and log are tracked at a time: starting a new run clears
+the previous run's logs.
+
+==============================================================================
+5. COMMANDS                                               *ask-agent-commands*
+
+                                                                   *:AskAgent*
+:'<,'>AskAgent [prompt]
+    Send the last visual selection to the agent. Without arguments, open
+    the floating prompt window (|ask-agent-prompt|). With arguments, use
+    them as the instruction and run immediately: >vim
+
+        :'<,'>AskAgent rename this function and update call sites
+<
+    Characterwise, linewise and blockwise selections are supported. The
+    buffer must have a file name.
+
+                                                               *:AskAgentLogs*
+:AskAgentLogs
+    Open the output of the current or most recent run in a split at the
+    bottom of the screen. The split updates live while the agent runs.
+    See |ask-agent-logs|.
+
+==============================================================================
+6. PROMPT WINDOW                                            *ask-agent-prompt*
+
+The prompt opens in a centered floating window with 'filetype' set to
+`markdown`. Size is controlled by `prompt_width` and `prompt_height`.
+
+Keys:
+
+    <CR>        Submit the prompt (insert and normal mode)
+    <S-CR>      Insert a new line
+    <C-j>       Insert a new line (for terminals that do not send <S-CR>)
+    <Esc>       Cancel
+
+Submitting an empty prompt cancels the request.
+
+==============================================================================
+7. STATUSLINE                                           *ask-agent-statusline*
+
+|ask-agent.statusline()| returns a string such as "Codex ⠙ <latest output>"
+while an agent is running, and an empty string otherwise. Add it to your
+statusline: >lua
+
+    _G.ask_agent_statusline = function()
+      return require("ask-agent").statusline()
+    end
+
+    vim.o.statusline = vim.o.statusline .. " %{v:lua.ask_agent_statusline()}"
+<
+The message is truncated to `status_max_message_length` characters and `%`
+is escaped so it is safe to embed in 'statusline'.
+
+==============================================================================
+8. LOGS                                                       *ask-agent-logs*
+
+stdout and stderr from the agent are collected into an in-memory log of at
+most `max_log_lines` lines. |:AskAgentLogs| opens it in a scratch split whose
+height is `log_height_ratio` of the editor height. Focus stays in the
+original window.
+
+Log window keys:
+
+    q           Close the log split
+
+If the agent exits with a non-zero code, the first lines of stderr are shown
+in a notification.
+
+==============================================================================
+9. CONFIGURATION                                     *ask-agent-configuration*
+
+Pass a table to |ask-agent.setup()|. Defaults: >lua
+
+    require("ask-agent").setup({
+      provider = "codex",
+      codex_cmd = "codex",
+      claude_cmd = "claude",
+      sandbox = "workspace-write",
+      model = nil,
+      extra_args = {},
+      notify = vim.notify,
+      prompt_width = 72,
+      prompt_height = 10,
+      status_spinner = { "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏" },
+      status_update_interval_ms = 120,
+      status_max_message_length = 80,
+      log_height_ratio = 0.33,
+      max_log_lines = 1000,
+      live_reload = true,
+      live_reload_interval_ms = 1000,
+    })
+<
+                                                   *ask-agent-config-provider*
+provider ~
+    Which agent CLI to run: `"codex"` or `"claude"`. An unknown value raises
+    an error from |ask-agent.setup()|. See |ask-agent-providers|.
+
+                                                  *ask-agent-config-codex_cmd*
+codex_cmd ~
+    Executable used for the `codex` provider.
+
+                                                 *ask-agent-config-claude_cmd*
+claude_cmd ~
+    Executable used for the `claude` provider.
+
+                                                    *ask-agent-config-sandbox*
+sandbox ~
+    Value passed to `codex exec --sandbox`. Codex only.
+
+                                                      *ask-agent-config-model*
+model ~
+    When set, passed to the agent as `--model <model>`.
+
+                                                 *ask-agent-config-extra_args*
+extra_args ~
+    List of extra arguments appended to the agent command.
+
+                                                     *ask-agent-config-notify*
+notify ~
+    Function used for notifications, with the signature of |vim.notify()|.
+
+                                               *ask-agent-config-prompt_width*
+                                              *ask-agent-config-prompt_height*
+prompt_width, prompt_height ~
+    Maximum size of the floating prompt window. Clamped to the editor size.
+
+                                             *ask-agent-config-status_spinner*
+status_spinner ~
+    List of frames cycled by the statusline spinner.
+
+                                  *ask-agent-config-status_update_interval_ms*
+status_update_interval_ms ~
+    Milliseconds between spinner frames.
+
+                                  *ask-agent-config-status_max_message_length*
+status_max_message_length ~
+    Maximum length of the statusline message. Set to 0 to disable
+    truncation.
+
+                                           *ask-agent-config-log_height_ratio*
+log_height_ratio ~
+    Height of the log split as a fraction of 'lines'. Minimum 3 lines.
+
+                                              *ask-agent-config-max_log_lines*
+max_log_lines ~
+    Number of log lines kept in memory. Older lines are dropped.
+
+                                                *ask-agent-config-live_reload*
+live_reload ~
+    When true, run |:checktime| while the agent runs and when it exits so
+    edited buffers reload.
+
+                                    *ask-agent-config-live_reload_interval_ms*
+live_reload_interval_ms ~
+    Milliseconds between periodic |:checktime| calls.
+
+==============================================================================
+10. PROVIDERS                                            *ask-agent-providers*
+
+codex ~
+    Runs: >sh
+
+        codex exec --sandbox <sandbox> --cd <root> [--model <model>] \
+            [extra_args...] -
+<
+claude ~
+    Runs: >sh
+
+        claude -p --permission-mode acceptEdits --add-dir <root> \
+            [--model <model>] [extra_args...]
+<
+In both cases the job runs with <root> as its working directory, where <root>
+is the |ask-agent-workspace-root|.
+
+==============================================================================
+11. WORKSPACE ROOT                                  *ask-agent-workspace-root*
+
+If the current file is inside a Git repository, the repository root is the
+workspace root. Otherwise Neovim's current working directory (|getcwd()|) is
+used. The file path sent to the agent is relative to this root.
+
+==============================================================================
+12. LUA API                                                    *ask-agent-api*
+
+                                                         *ask-agent.setup()*
+require("ask-agent").setup({opts})
+    Apply configuration (see |ask-agent-configuration|), reset plugin state
+    and (re)create the user commands.
+
+                                                    *ask-agent.statusline()*
+require("ask-agent").statusline()
+    Return the statusline string for the running agent, or an empty string.
+    See |ask-agent-statusline|.
+
+                                               *ask-agent.apply_selection()*
+require("ask-agent").apply_selection({prompt})
+    Same as |:AskAgent|. When {prompt} is empty or nil, open the prompt
+    window.
+
+ vim:tw=78:ts=8:ft=help:norl:

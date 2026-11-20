@@ -1,4 +1,4 @@
-# ask-agent.nvim
+# ask-agent
 
 ## Agent skills
 

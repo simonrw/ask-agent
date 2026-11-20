@@ -1,4 +1,4 @@
-# ask-agent.nvim
+# ask-agent
 
 Select code in visual mode, write an instruction in a floating prompt, and let Codex or Claude implement the change in place.
 
@@ -16,6 +16,8 @@ claude -p --permission-mode acceptEdits --add-dir <workspace-root>
 
 The generated prompt is passed over stdin. The selected text is included as focus context, and the agent may edit related files in the workspace. If the current file is inside a Git repository, ask-agent uses that repository root as the workspace root. Otherwise, it uses Neovim's current working directory. While the agent runs, the statusline can show an animated spinner plus the latest output, then disappear when it exits. Neovim checks for file changes so edited buffers can refresh during the run. Logs stay hidden unless you open them.
 
+Full documentation is available in Neovim with `:help ask-agent`.
+
 ## Requirements
 
 - Neovim 0.10 or newer
@@ -27,7 +29,7 @@ With `lazy.nvim`:
 
 ```lua
 {
-  "your-name/ask-agent.nvim",
+  "simonrw/ask-agent",
   config = function()
     require("ask-agent").setup()
   end,
